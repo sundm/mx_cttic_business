@@ -82,6 +82,34 @@ public class CtticLoad {
 		mLoadThread.start();
 	}
 
+	public void queryPayForLoadStatus(final PayOrder order, MXLoadCallBack callback) {
+		this.mOrder = order;
+		this.mLoadCallBack = callback;
+
+		ExecutorService executor = Executors.newCachedThreadPool();
+		Future<Boolean> result = executor.submit(new PayConfirmThread());
+
+		try {
+			
+			if (result.get()) {
+
+				if (mCtticTradeResult == null) {
+					mCtticTradeResult = new CtticTradeResult();
+				}
+				mCtticTradeResult.setTradeId(order.getTradeId());
+				mCtticTradeResult.setResultCode(0);
+				mCtticTradeResult.setErrInfo("支付成功");
+				mLoadCallBack.onReceiveCallBack(mCtticTradeResult);
+
+			}
+			executor.shutdown();
+		} catch (InterruptedException e) {
+			e.printStackTrace();
+		} catch (ExecutionException e) {
+			e.printStackTrace();
+		}
+	}
+
 	public void doCtticLoad(final PayOrder order, DeviceType deviceType, LOAD_TYPE loadType, MXLoadCallBack callback) {
 		this.mLoadCallBack = callback;
 		this.mDeviceType = deviceType;
@@ -93,27 +121,12 @@ public class CtticLoad {
 		if (!CtticCard.getInstance(deviceType).checkCard())
 			doFailCallBack(CtticTradeResult.DEVICE_POWER_ON_ERROR, "卡片上电失败");
 
-		ExecutorService executor = Executors.newCachedThreadPool();
-		Future<Boolean> result = executor.submit(new PayConfirmThread());
-
-		try {
-			MXLog.i(TAG, mDeviceType.name());
-			if (result.get()) {
-
-				if (mDeviceType == DeviceType.NFC) {
-					mCtticReader = NFCReader.getInstance();
-				}
-
-				mLoadThread = new Thread(new LoadForCttic());
-				mLoadThread.start();
-
-			}
-			executor.shutdown();
-		} catch (InterruptedException e) {
-			e.printStackTrace();
-		} catch (ExecutionException e) {
-			e.printStackTrace();
+		if (mDeviceType == DeviceType.NFC) {
+			mCtticReader = NFCReader.getInstance();
 		}
+
+		mLoadThread = new Thread(new LoadForCttic());
+		mLoadThread.start();
 
 	}
 
@@ -196,7 +209,7 @@ public class CtticLoad {
 			paramesField.clear();
 			preField.clear();
 			paramesField.put(ArteryPreDef.FIELD_tradeId, mOrder.getTradeId());
-			
+
 			paramesField.put(ArteryPreDef.FIELD_retryTime, "-1");
 			mLoadCallBack.onMessageOut("正在查询支付结果");
 			while (true) {
@@ -269,9 +282,9 @@ public class CtticLoad {
 			paramesField.put("inApdu", "");
 			paramesField.put("step", "");
 			if (mLoadType == LOAD_TYPE.INTERFLOW) {
-				paramesField.put("area", "1"); 
+				paramesField.put("area", "1");
 			} else if (mLoadType == LOAD_TYPE.LOCAL) {
-				paramesField.put("area", "2"); 
+				paramesField.put("area", "2");
 			}
 
 			preField.put(ArteryPreDef.FIELD_method, "");

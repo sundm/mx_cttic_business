@@ -6,11 +6,11 @@ import java.util.Map;
 
 import android.R.integer;
 
-import com.mx.nfclib.NFCReader;
-import com.cttic.se.CtticReader;
-import com.mx.se.CardDef;
 import com.cttic.se.ConnectException;
+import com.cttic.se.CtticReader;
 import com.cttic.se.TimeoutException;
+import com.mx.nfclib.NFCReader;
+import com.mx.se.CardDef;
 import com.mx.util.MXBaseUtil;
 import com.mx.util.exception.DeviceConnectException;
 import com.mx.util.exception.DeviceTransException;
@@ -21,6 +21,10 @@ import com.mx.util.pboc.PbocOffLineResp;
 public class CtticCard {
 	public static final String AID_MOT_EC = "A000000632010106";
 	public static final String AID_MOT_EP = "A000000632010105";
+	public static final String AID_MOT_COMMON = "A00000000386980701";
+	public static final String AID_MOT_BJ = "4F43";
+	public static final String AID_MOT_SZ = "5041592E535A54";
+	public static final String AID_MOT_JL = "A00000000886980701";
 
 	public static final String AID_MOT_PBOC = "A0000003330101";
 
@@ -88,38 +92,262 @@ public class CtticCard {
 				try {
 					mCtticReader.powerOn(2000);
 					ReaderTag readerTag = new ReaderTag(mCtticReader);
-					int sw = readerTag.selectByName(MXBaseUtil.hex2byte(CtticCard.AID_MOT_EP));
+					CtticCardInfo ctticCardInfo = new CtticCardInfo();
+					String aidString = CtticCard.AID_MOT_EP;
+					int sw = readerTag.selectByName(MXBaseUtil.hex2byte(aidString));
+					while (true) {
+
+						if (sw != CardDef.SWOK) {
+							aidString = CtticCard.AID_MOT_COMMON;
+							sw = readerTag.selectByName(MXBaseUtil.hex2byte(aidString));
+						} else {
+							sw = readerTag.readBinary(0x15);
+							if (sw != CardDef.SWOK) {
+								mQueryCardCallBack.onReceiveQueryCard(CtticTradeResult.READBINARY_ERROR, null);
+								return;
+							}
+
+							ctticCardInfo.setCardId(readerTag.getRes().substring(21, 40));
+							ctticCardInfo.setStartDate(readerTag.getRes().substring(40, 48));
+							ctticCardInfo.setEndDate(readerTag.getRes().substring(48, 56));
+
+							ctticCardInfo.setType("互联互通");
+
+							sw = readerTag.sendAPDU("805C010204");
+							if (sw == CardDef.SWOK) {
+								ctticCardInfo.setLimitBalance(String.format("%d",
+										Integer.parseInt(readerTag.getRes(), 16)));
+							}
+							sw = readerTag.sendAPDU("805C020204");
+							if (sw == CardDef.SWOK) {
+								ctticCardInfo.setUsedLimitAmt(String.format("%d",
+										Integer.parseInt(readerTag.getRes(), 16)));
+							}
+							sw = readerTag.sendAPDU("805C030204");
+							if (sw == CardDef.SWOK) {
+								ctticCardInfo.setUseBalance(String.format("%d",
+										Integer.parseInt(readerTag.getRes(), 16)));
+							}
+
+							break;
+						}
+
+						if (sw != CardDef.SWOK) {
+							aidString = CtticCard.AID_MOT_BJ;
+							sw = readerTag.selectByName(MXBaseUtil.hex2byte(aidString));
+						} else {
+							sw = readerTag.readBinary(0x15);
+							if (sw != CardDef.SWOK) {
+								mQueryCardCallBack.onReceiveQueryCard(CtticTradeResult.READBINARY_ERROR, null);
+								return;
+							}
+
+							String cardId = readerTag.getRes().substring(20, 40);
+							String startDate = readerTag.getRes().substring(40, 48);
+							String endDate = readerTag.getRes().substring(48, 56);
+
+							String cityCode = cardId.substring(0, 4);
+							// 上海一卡通
+							if (cityCode.equals("2000")) {
+								String code = cardId.substring(12);
+								long lCode = Long.valueOf(code, 16);
+								String temp = String.valueOf(lCode);
+								StringBuilder cardNoTemp = new StringBuilder();
+								for (int i = 0; i < temp.length() / 2; i++) {
+									cardNoTemp.append(temp.substring(temp.length() - (i + 1) * 2, temp.length() - i * 2));
+								}
+
+								ctticCardInfo.setCardId(cardNoTemp.toString());
+								ctticCardInfo.setType("上海一卡通");
+							}
+
+							// 合肥通
+							if (cityCode.equals("2300") || cityCode.equals("0000")) {
+								ctticCardInfo.setCardId(cardId.substring(12));
+								ctticCardInfo.setType("合肥通");
+							}
+
+							// 杭州一卡通
+							if (cityCode.equals("3100")) {
+								ctticCardInfo.setCardId(cardId.substring(12));
+								ctticCardInfo.setType("杭州一卡通");
+							}
+
+							// 哈尔滨城市通
+							if (cityCode.equals("1500")) {
+								ctticCardInfo.setCardId(String.valueOf(Integer.valueOf(cardId.substring(12), 16)));
+								ctticCardInfo.setType("哈尔滨城市通");
+							}
+
+							// 大连明珠卡
+							if (cityCode.equals("1160")) {
+								ctticCardInfo.setCardId(String.valueOf(Integer.valueOf(cardId.substring(12), 16)));
+								ctticCardInfo.setType("大连明珠卡");
+							}
+							
+							if (cityCode.equals("1231")) {
+								ctticCardInfo.setCardId(String.valueOf(Integer.valueOf(cardId.substring(12), 16)));
+								ctticCardInfo.setType("重庆畅通卡");
+							}
+
+							ctticCardInfo.setStartDate(startDate);
+							ctticCardInfo.setEndDate(endDate);
+
+							sw = readerTag.sendAPDU("805C000204");
+							if (sw == CardDef.SWOK) {
+
+								long nlBalance = Long.valueOf(readerTag.getRes(), 16);
+								long sub = Long.valueOf("80000000", 16);
+
+								String balanceString = null;
+								if (nlBalance > 1000000) {
+									int i = (int) (nlBalance - sub);
+									balanceString = String.valueOf(i);
+								} else {
+									balanceString = String.valueOf(nlBalance);
+								}
+
+								ctticCardInfo.setUseBalance(balanceString);
+							}
+
+							break;
+						}
+
+						if (sw != CardDef.SWOK) {
+							aidString = CtticCard.AID_MOT_JL;
+							sw = readerTag.selectByName(MXBaseUtil.hex2byte(aidString));
+						} else {
+							sw = readerTag.sendAPDU("805C000204");
+							if (sw == CardDef.SWOK) {
+
+								long nlBalance = Long.valueOf(readerTag.getRes(), 16);
+								long sub = Long.valueOf("80000000", 16);
+
+								String balanceString = null;
+								if (nlBalance > 1000000) {
+									int i = (int) (nlBalance - sub);
+									balanceString = String.valueOf(i);
+								} else {
+									balanceString = String.valueOf(nlBalance);
+								}
+
+								ctticCardInfo.setUseBalance(balanceString);
+							}
+
+							sw = readerTag.selectByID(MXBaseUtil.hex2byte("3F00"));
+							if (sw != CardDef.SWOK) {
+								mQueryCardCallBack.onReceiveQueryCard(CtticTradeResult.SELECT_ERROR, null);
+								return;
+							}
+							sw = readerTag.readBinary(0x04);
+							String cardId = readerTag.getRes().substring(0, 16);
+							ctticCardInfo.setCardId(cardId);
+							ctticCardInfo.setType("北京一卡通");
+
+							break;
+						}
+
+						if (sw != CardDef.SWOK) {
+							aidString = CtticCard.AID_MOT_SZ;
+							sw = readerTag.selectByName(MXBaseUtil.hex2byte(aidString));
+						} else {
+							sw = readerTag.readBinary(0x15);
+							if (sw != CardDef.SWOK) {
+								mQueryCardCallBack.onReceiveQueryCard(CtticTradeResult.READBINARY_ERROR, null);
+								return;
+							}
+
+							String cardId = readerTag.getRes().substring(20, 40);
+							String startDate = readerTag.getRes().substring(40, 48);
+							String endDate = readerTag.getRes().substring(48, 56);
+
+							ctticCardInfo.setCardId(cardId.substring(4));
+							ctticCardInfo.setType("吉林通");
+							ctticCardInfo.setStartDate(startDate);
+							ctticCardInfo.setEndDate(endDate);
+
+							sw = readerTag.sendAPDU("805C000204");
+							if (sw == CardDef.SWOK) {
+
+								long nlBalance = Long.valueOf(readerTag.getRes(), 16);
+								long sub = Long.valueOf("80000000", 16);
+
+								String balanceString = null;
+								if (nlBalance > 1000000) {
+									int i = (int) (nlBalance - sub);
+									balanceString = String.valueOf(i);
+								} else {
+									balanceString = String.valueOf(nlBalance);
+								}
+
+								ctticCardInfo.setUseBalance(balanceString);
+							}
+
+							break;
+						}
+
+						if (sw != CardDef.SWOK) {
+							mQueryCardCallBack.onReceiveQueryCard(CtticTradeResult.SELECT_ERROR, null);
+							return;
+						} else {
+							sw = readerTag.readBinary(0x15);
+							if (sw != CardDef.SWOK) {
+								mQueryCardCallBack.onReceiveQueryCard(CtticTradeResult.READBINARY_ERROR, null);
+								return;
+							}
+
+							String cardId = readerTag.getRes().substring(20, 40);
+							String startDate = readerTag.getRes().substring(40, 48);
+							String endDate = readerTag.getRes().substring(48, 56);
+
+							String temp = cardId.substring(12);
+							StringBuilder cardNoTemp = new StringBuilder();
+							for (int i = 0; i < temp.length() / 2; i++) {
+								cardNoTemp.append(temp.substring(temp.length() - (i+1) * 2, temp.length() - i * 2));
+							}
+							
+							String cardNoString = cardNoTemp.toString();
+
+							ctticCardInfo.setCardId(String.valueOf(Integer.valueOf(cardNoString, 16)));
+							ctticCardInfo.setType("深圳通");
+							ctticCardInfo.setStartDate(startDate);
+							ctticCardInfo.setEndDate(endDate);
+
+							sw = readerTag.sendAPDU("805C000204");
+							if (sw == CardDef.SWOK) {
+
+								long nlBalance = Long.valueOf(readerTag.getRes(), 16);
+								long sub = Long.valueOf("80000000", 16);
+
+								String balanceString = null;
+								if (nlBalance > 1000000) {
+									int i = (int) (nlBalance - sub);
+									balanceString = String.valueOf(i);
+								} else {
+									balanceString = String.valueOf(nlBalance);
+								}
+
+								ctticCardInfo.setUseBalance(balanceString);
+							}
+
+							break;
+						}
+					}
+
+					// ep log
+					sw = readerTag.selectByName(MXBaseUtil.hex2byte(aidString));
 					if (sw != CardDef.SWOK) {
 						mQueryCardCallBack.onReceiveQueryCard(CtticTradeResult.SELECT_ERROR, null);
 						return;
 					}
-					sw = readerTag.readBinary(0x15);
-					if (sw != CardDef.SWOK) {
-						mQueryCardCallBack.onReceiveQueryCard(CtticTradeResult.READBINARY_ERROR, null);
-						return;
-					}
-					CtticCardInfo ctticCardInfo = new CtticCardInfo();
-					ctticCardInfo.setCardId(readerTag.getRes().substring(21, 40));
-					ctticCardInfo.setStartDate(readerTag.getRes().substring(40, 48));
-					ctticCardInfo.setEndDate(readerTag.getRes().substring(48, 56));
-					// ���������棰�
-					sw = readerTag.sendAPDU("805C010204");
-					if (sw == CardDef.SWOK) {
-						ctticCardInfo.setLimitBalance(String.format("%d", Integer.parseInt(readerTag.getRes(), 16)));
-					}
-					sw = readerTag.sendAPDU("805C020204");
-					if (sw == CardDef.SWOK) {
-						ctticCardInfo.setUsedLimitAmt(String.format("%d", Integer.parseInt(readerTag.getRes(), 16)));
-					}
-					sw = readerTag.sendAPDU("805C030204");
-					if (sw == CardDef.SWOK) {
-						ctticCardInfo.setUseBalance(String.format("%d", Integer.parseInt(readerTag.getRes(), 16)));
-					}
-					// ep log
+
 					List<String> epLog = new ArrayList<String>();
 					for (int i = 1; i <= 10; i++) {
 						sw = readerTag.readRecord(0x18, i);
 						if (sw == CardDef.SWOK) {
+							if (readerTag.getRes().contains("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF")) {
+								continue;
+							}
 							epLog.add(readerTag.getRes());
 						}
 					}
@@ -132,13 +360,6 @@ public class CtticCard {
 					ctticCardInfo.setListCardECRecords(logMap);
 					mQueryCardCallBack.onReceiveQueryCard(SUCCESS, ctticCardInfo);
 
-					// PbocOffLineResp pbocOffLineResp = pbocEntity
-					// .getOffLineMap(readerTag);
-					// if (pbocOffLineResp.getCode() == CardDef.CARD_SUCCESS) {
-					// Map<String, String> pbocMap = pbocOffLineResp
-					// .getPbocMap();
-					// Log.i("map", pbocMap.toString());
-					// }
 				} catch (ConnectException e) {
 					e.printStackTrace();
 					mQueryCardCallBack.onReceiveQueryCard(CtticTradeResult.CONNECT_ERROR, null);
@@ -178,6 +399,13 @@ public class CtticCard {
 					pbocEntity.setAid(AID_MOT_PBOC);
 
 					PbocOffLineResp pbocOffLineResp = pbocEntity.getOffLineMap(readerTag);
+
+					if (pbocOffLineResp.getCode() != 0) {
+						mQueryPbocCardCallBack.onReceiveQueryPBCard(CtticTradeResult.SELECT_ERROR, null);
+						mCtticReader.powerOff();
+						return;
+					}
+
 					String balanceStr = pbocEntity.getData(readerTag, (byte) 0x9F, (byte) 0x79);
 
 					List<Map<String, String>> logMap = pbocEntity.getOfflineLog(readerTag);
@@ -196,6 +424,10 @@ public class CtticCard {
 						pbCardInfo.setListCardECRecords(logMap);
 
 						mQueryPbocCardCallBack.onReceiveQueryPBCard(SUCCESS, pbCardInfo);
+					} else {
+						mQueryPbocCardCallBack.onReceiveQueryPBCard(CtticTradeResult.READBINARY_ERROR, null);
+						mCtticReader.powerOff();
+						return;
 					}
 				} catch (ConnectException e) {
 					e.printStackTrace();
@@ -274,6 +506,22 @@ public class CtticCard {
 			return true;
 
 		sw = readerTag.selectByName(MXBaseUtil.hex2byte(CtticCard.AID_MOT_PBOC));
+		if (sw == CardDef.SWOK)
+			return true;
+
+		sw = readerTag.selectByName(MXBaseUtil.hex2byte(CtticCard.AID_MOT_COMMON));
+		if (sw == CardDef.SWOK)
+			return true;
+
+		sw = readerTag.selectByName(MXBaseUtil.hex2byte(CtticCard.AID_MOT_BJ));
+		if (sw == CardDef.SWOK)
+			return true;
+
+		sw = readerTag.selectByName(MXBaseUtil.hex2byte(CtticCard.AID_MOT_JL));
+		if (sw == CardDef.SWOK)
+			return true;
+
+		sw = readerTag.selectByName(MXBaseUtil.hex2byte(CtticCard.AID_MOT_SZ));
 		if (sw == CardDef.SWOK)
 			return true;
 

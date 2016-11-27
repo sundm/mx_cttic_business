@@ -16,7 +16,7 @@ public class CtticCardInfo implements Serializable {
 	// 卡片停用日期 YYMMDD
 	public String endDate;
 	// 卡片类型 蚌埠 平顶山
-	public String type;
+	public String type = "";
 	// 可用余额
 	public String useBalance;
 	// 透支限额
@@ -34,6 +34,14 @@ public class CtticCardInfo implements Serializable {
 
 	public void setCardId(String cardId) {
 		this.cardId = cardId;
+	}
+	
+	public String getType() {
+		return type;
+	}
+
+	public void setType(String type) {
+		this.type = type;
 	}
 
 	public String getStartDate() {
